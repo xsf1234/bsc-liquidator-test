@@ -1,28 +1,31 @@
-name: CI  # Workflow名称
+name: CI
 
 on:
   push:
-    branches: [main]  # push到main触发
+    branches: [main]
   pull_request:
-    branches: [main]  # PR到main触发
+    branches: [main]
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest  # 使用GitHub托管runner（或self-hosted如果VPS配置）
+    runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4  # 检出代码
+    - uses: actions/checkout@v4
 
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '20'  # 您的Node版，历史Node 22? 调整
+        node-version: '22'  # 升级到22，fix兼容
 
     - name: Install dependencies
-      run: npm install --legacy-peer-deps  # 历史命令
+      run: npm install --legacy-peer-deps
+
+    - name: Fix vulnerabilities (optional)
+      run: npm audit fix --force || true  # 忽略失败，继续
 
     - name: Compile contracts
       run: npx hardhat compile
 
     - name: Run tests
-      run: npx hardhat test  # flash-liquidator.spec.ts
+      run: npx hardhat test
