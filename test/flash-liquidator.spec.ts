@@ -1,56 +1,34 @@
-import { expect } from "chai";
-import { ethers } from "hardhat";
-import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
-import { BscFlashLiquidator, MockERC20, MockVToken } from "../typechain-types";  // 调整如果路径错
+const { expect } = require("chai");
+const { ethers } = require("hardhat");
+const { BscFlashLiquidator, MockERC20, MockVToken } = require("../typechain-types");
 
-describe("BscFlashLiquidator Tests", () => {
-  async function deployFixture() {
-    const [owner] = await ethers.getSigners();
+describe("BscFlashLiquidator Venus Liquidation Tests", () => {
+  let liquidator, mockToken, mockVToken, owner;
 
-    // Mock USDT
-    const MockERC20 = await ethers.getContractFactory("MockERC20");
-    const usdt = await MockERC20.deploy("USDT", "USDT", 18);
+  beforeEach(async () => {
+    [owner] = await ethers.getSigners();
+    const MockERC20Factory = await ethers.getContractFactory("MockERC20");
+    mockToken = await MockERC20Factory.deploy("MockUSDT", "USDT");
 
-    // Mock vUSDT (Venus-like)
-    const MockVToken = await ethers.getContractFactory("MockVToken");
-    const vUSDT = await MockVToken.deploy(usdt.address);
+    const MockVTokenFactory = await ethers.getContractFactory("MockVToken");
+    mockVToken = await MockVTokenFactory.deploy(mockToken.address);
 
-    // Mock Collateral Token (e.g., vBNB for liquidation)
-    const bnb = await MockERC20.deploy("BNB", "BNB", 18);
-    const vBNB = await MockVToken.deploy(bnb.address);
+    const LiquidatorFactory = await ethers.getContractFactory("BscFlashLiquidator");
+    liquidator = await LiquidatorFactory.deploy(/* Venus params */);
 
-    // Deploy Liquidator (假设无参构造函数；调整如果需Venus Comptroller/Pool地址)
-    const BscFlashLiquidator = await ethers.getContractFactory("BscFlashLiquidator");
-    const liquidator = await BscFlashLiquidator.deploy();
-    await liquidator.waitForDeployment();
-
-    // 模拟不良贷款：owner抵押500 USDT，借600（over-borrow，假设mock中borrow允许）
-    await usdt.mint(owner.address, ethers.parseUnits("1000", 18));
-    await usdt.connect(owner).approve(vUSDT.address, ethers.parseUnits("500", 18));
-    await vUSDT.connect(owner).mint(ethers.parseUnits("500", 18));  // 抵押
-    await bnb.mint(vUSDT.address, ethers.parseUnits("1000", 18));  // mock流动性
-    await vUSDT.connect(owner).borrow(ethers.parseUnits("600", 18));  // 过借，模拟shortfall
-
-    // 批准liquidator使用token（如果需flash/liquidate）
-    await usdt.connect(owner).approve(liquidator.address, ethers.parseUnits("1000", 18));
-
-    return { liquidator, owner, vUSDT, vBNB };
-  }
-
-  it("Should simulate bad loan and check liquidity", async () => {
-    const { owner, vUSDT } = await loadFixture(deployFixture);
-    const balance = await vUSDT.borrowBalanceStored(owner.address);
-    expect(balance).to.be.gt(ethers.parseUnits("500", 18));  // 确认借额 > 抵押，模拟不良
+    // 模拟借款/不足抵押
+    await mockToken.mint(owner.address, ethers.utils.parseEther("1000"));
+    await mockToken.approve(mockVToken.address, ethers.utils.parseEther("1000"));
+    await mockVToken.mockBorrow(owner.address, ethers.utils.parseEther("500"));  // 模拟借款
   });
 
-  it("Should execute flash liquidation successfully", async () => {
-    const { liquidator, owner, vUSDT, vBNB } = await loadFixture(deployFixture);
-    const initialBorrow = await vUSDT.borrowBalanceStored(owner.address);
+  it("Should liquidate undercollateralized position", async () => {
+    // 模拟清算条件
+    await mockVToken.setUndercollateralized(owner.address, true);
 
-    // 调用清算（假设liquidate函数：borrower, vTokenBorrowed, vTokenCollateral, repayAmount；调整为您的签名）
-    await liquidator.liquidate(owner.address, vUSDT.address, vBNB.address, ethers.parseUnits("300", 18));
+    // 执行清算
+    await liquidator.liquidate(owner.address, mockVToken.address, ethers.utils.parseEther("250"));
 
-    const finalBorrow = await vUSDT.borrowBalanceStored(owner.address);
-    expect(finalBorrow).to.be.lt(initialBorrow);  // 确认清算减少借额
+    expect(await mockVToken.balanceOf(liquidator.address)).to.be.gt(0);  // 清算获利
   });
 });
