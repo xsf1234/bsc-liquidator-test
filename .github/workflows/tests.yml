@@ -1,0 +1,54 @@
+name: Run Hardhat Tests  # 历史"Run tests"
+
+on:
+  push:
+    branches: [ main ]  # push main触发
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest  # 云VM
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4  # clone repo
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'  # 历史Node
+
+    - name: Install dependencies
+      run: npm install --legacy-peer-deps  # fix peer冲突
+
+    - name: Audit fix
+      run: npm audit fix  # minor修复
+
+    - name: Clean Hardhat cache
+      run: npx hardhat clean && rm -rf artifacts cache typechain-types .hardhat  # 彻底清理
+
+    - name: Compile contracts with force
+      run: npx hardhat compile --force  # 强制生成typechain
+      env:
+        ALCHEMY_API_KEY: ${{ secrets.ALCHEMY_API_KEY }}  # fork用
+
+    - name: Generate typechain manually
+      run: npx hardhat typechain  # 额外确保生成
+
+    - name: Run tests
+      run: npx hardhat test --verbose --show-stack-traces
+      env:
+        ALCHEMY_API_KEY: ${{ secrets.ALCHEMY_API_KEY }}
+        PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}  # 如果config需
+
+    - name: Upload test artifacts (if fail)
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-logs
+        path: |
+          artifacts/
+          typechain-types/
+          test/*.log  # 如果有额外logs
+
